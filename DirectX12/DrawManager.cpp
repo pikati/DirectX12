@@ -31,15 +31,22 @@ void DrawManager::Initialize(ID3D12Device* device, IDXGIFactory6* factory, HWND 
 	InitializeSwapChain();
 	InitializeDescriptorHeap();
 	InitializeRenderTargetView();
-	InitializeRenderTarget();
+	InitializeBarrier();
 }
 
 void DrawManager::Draw()
 {
 	Clear();
-	FlipRenderTarget();
+	FlipRenderTarget(false);
+	m_cmdList->Close();
+	ID3D12CommandList* cmdLists[] = { m_cmdList };
+	m_cmdQueue->ExecuteCommandLists(1, cmdLists);
 	//0だと垂直同期を待たずに次のフレームが始まる1にすると待つよ
 	m_chain->Present(1, 0);
+
+	WaitForCommandQueue();
+	auto a = m_cmdAllocator->Reset();
+	m_cmdList->Reset(m_cmdAllocator, nullptr);
 }
 
 void DrawManager::Finalize()
@@ -50,6 +57,7 @@ void DrawManager::Finalize()
 void DrawManager::InitializeQueue()
 {
 	D3D12_COMMAND_QUEUE_DESC cmdQueueDesc = {};
+	ZeroMemory(&cmdQueueDesc, sizeof(cmdQueueDesc));
 
 	//タイムアウトなし
 	cmdQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -70,6 +78,7 @@ void DrawManager::InitializeQueue()
 void DrawManager::InitializeSwapChain()
 {
 	DXGI_SWAP_CHAIN_DESC1 sChainDesc = {};
+	ZeroMemory(&sChainDesc, sizeof(sChainDesc));
 
 	sChainDesc.Width = WINDOW_WIDTH;
 	sChainDesc.Height = WINDOW_HEIGHT;
@@ -77,7 +86,7 @@ void DrawManager::InitializeSwapChain()
 	sChainDesc.Stereo = false;
 	sChainDesc.SampleDesc.Count = 1;
 	sChainDesc.SampleDesc.Quality = 0;
-	sChainDesc.BufferUsage = DXGI_USAGE_BACK_BUFFER;
+	sChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	sChainDesc.BufferCount = 2;
 
 	//バックバッファは伸び縮み可能
@@ -105,6 +114,7 @@ void DrawManager::InitializeSwapChain()
 void DrawManager::InitializeDescriptorHeap()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+	ZeroMemory(&heapDesc, sizeof(heapDesc));
 
 	heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; // レンダーターゲットビューなのでRTV
 	heapDesc.NodeMask = 0;
@@ -138,57 +148,54 @@ void DrawManager::InitializeFence()
 	auto result = m_device->CreateFence(m_fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
 }
 
-void DrawManager::InitializeRenderTarget()
+void DrawManager::InitializeBarrier()
 {
 	m_barrierDesc = {};
+	ZeroMemory(&m_barrierDesc, sizeof(m_barrierDesc));
 
 	m_barrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	m_barrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 	m_barrierDesc.Transition.pResource = m_backBuffers[bbIdx];
-	m_barrierDesc.Transition.Subresource = 0;
+	m_barrierDesc.Transition.Subresource = 0; //D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCESは複数サブリソース餅かつ全部を指定するとき
 }
 
 ////////////////////////////////////////////86p\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+//やっぱここら辺が間違っていそう。記録中に無効な引数がコマンドリストに渡されてるみたい
 void DrawManager::Clear()
 {
-	m_cmdList->Reset(m_cmdAllocator, );
-	HRESULT h = m_cmdAllocator->Reset();
+	////m_cmdList->Reset(m_cmdAllocator, );
+	//HRESULT h = m_cmdAllocator->Reset();
 	//これ複数回使うからconstで保存しておくべくとか
+	//SetRenderTarget();
 	bbIdx = m_chain->GetCurrentBackBufferIndex();//バックバッファのインデックスを取得ここに描画していく
 
 	auto rtvH = m_rtvHeaps->GetCPUDescriptorHandleForHeapStart();
 	rtvH.ptr += bbIdx * m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-	SetRenderTarget();
+	FlipRenderTarget(true);
 
 	m_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
 
 	float clearColor[] = { 1.0f, 1.0f, 0.0f, 1.0f };
 	m_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
-
-	m_cmdList->Close();
-
-	ID3D12CommandList* cmdLists[] = { m_cmdList };
-	m_cmdQueue->ExecuteCommandLists(1, cmdLists);
 	
-	//ここで処理終わったかチェックしてる
-	UINT64 n = m_fence->GetCompletedValue();
-	m_cmdQueue->Signal(m_fence, ++m_fenceVal);
-	while (n != m_fenceVal)
-	{
-		//イベントハンドルの取得
-		auto event = CreateEvent(nullptr, false, false, nullptr);
-		m_fence->SetEventOnCompletion(m_fenceVal, event);
+	////ここで処理終わったかチェックしてる
+	//UINT64 n = m_fence->GetCompletedValue();
+	//m_cmdQueue->Signal(m_fence, ++m_fenceVal);
+	//while (n != m_fenceVal)
+	//{
+	//	//イベントハンドルの取得
+	//	auto event = CreateEvent(nullptr, false, false, nullptr);
+	//	m_fence->SetEventOnCompletion(m_fenceVal, event);
 
-		//イベントが発生するまで待ち続ける
-		WaitForSingleObject(event, INFINITE);
+	//	//イベントが発生するまで待ち続ける
+	//	WaitForSingleObject(event, INFINITE);
 
-		//イベントハンドルを閉じる
-		CloseHandle(event);
-	}
+	//	//イベントハンドルを閉じる
+	//	CloseHandle(event);
+	//}
 
-	m_cmdAllocator->Reset();
-	m_cmdList->Reset(m_cmdAllocator, nullptr);
+	
 }
 
 void DrawManager::SetRenderTarget()
@@ -199,10 +206,29 @@ void DrawManager::SetRenderTarget()
 	m_cmdList->ResourceBarrier(1, &m_barrierDesc);
 }
 
-void DrawManager::FlipRenderTarget()
+void DrawManager::FlipRenderTarget(bool b)
 {
-	m_barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	m_barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+	m_barrierDesc.Transition.pResource = m_backBuffers[bbIdx];
+	if (b)
+	{
+		m_barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+		m_barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	}
+	else
+	{
+		m_barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		m_barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+	}
+	
 
 	m_cmdList->ResourceBarrier(1, &m_barrierDesc);
+}
+
+void DrawManager::WaitForCommandQueue() {
+	static UINT64 frames = 0;
+	auto event = CreateEvent(nullptr, false, false, nullptr);
+	m_fence->SetEventOnCompletion(frames, event);
+	m_cmdQueue->Signal(m_fence, frames);
+	WaitForSingleObject(event, INFINITE);
+	frames++;
 }

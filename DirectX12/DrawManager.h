@@ -29,10 +29,12 @@ private:
 	void InitializeRenderTargetView();
 
 	void InitializeFence();
-	void InitializeRenderTarget();
+	void InitializeBarrier();
 
 	void SetRenderTarget();
-	void FlipRenderTarget();
+	void FlipRenderTarget(bool b);
+
+	void WaitForCommandQueue();
 public:
 	DrawManager();
 	~DrawManager();

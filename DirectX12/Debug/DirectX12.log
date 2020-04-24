@@ -1,3 +1,3 @@
 ﻿  DrawManager.cpp
-D:\Git\DirectX12\DirectX12\DrawManager.cpp(124,24): warning C4018: '<': signed と unsigned の数値を比較しようとしました。
+D:\Git\DirectX12\DirectX12\DrawManager.cpp(134,24): warning C4018: '<': signed と unsigned の数値を比較しようとしました。
   DirectX12.vcxproj -> D:\Git\DirectX12\DirectX12\Debug\DirectX12.exe

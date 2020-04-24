@@ -16,6 +16,7 @@ static DirectX12App* application;
 void CreateWindowClass();
 void MessageLoop();
 
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
 	CreateWindowClass();
